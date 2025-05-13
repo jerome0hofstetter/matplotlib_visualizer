@@ -577,6 +577,6 @@ class CalorimeterUpdated(GeometryImitator):
             ]
         
 
-
+print("use the sliders to change parameters of the geometry, use option 'see detailed' or zoom into a space and then click redraw")
 geometry = CalorimeterUpdated()
 geometry.view_geometry()
