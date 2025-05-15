@@ -27,25 +27,6 @@ def line_from_points(p1, p2):
     return m, a
 
 
-def calo_shape_parameter_extrapolate(parameter):
-    innerpoint,outer_slope_point,outerpoint,angle = parameter
-    r_in =  np.linalg.norm(innerpoint)
-    r_out = np.linalg.norm(outerpoint)
-    return r_in,r_out,angle
-
-def calo_shape_check_vec(points,parameter):
-    
-    innerpoint,outer_slope_point,outerpoint,angle = parameter
-    r_in,r_out,angle = calo_shape_parameter_extrapolate(parameter)
-    r_p = np.linalg.norm(points,axis=1)
-    m,a = line_from_points(innerpoint,outer_slope_point)
-    
-    is_in = np.ones_like(points[:,0], dtype=bool)
-    # radius check + x_cutout (positive) check
-    is_in = is_in & (r_in<r_p) & (r_out>r_p) & (points[:,0]<outer_slope_point[0])
-    is_in = is_in & ((points[:,1]**2>(m *points[:,0]+a )**2) |(points[:,0]<0) )
-    return is_in
-
 def is_point_in_polygon(p:tuple[float,float], poly: list[tuple[float, float]]) -> bool:
     """
     Determine if the point is on the inside, corner, or boundary of the polygon defined via its edges
@@ -263,6 +244,64 @@ def get_cirle_point(r,angle):
     ang_rad = np.radians(angle)
     return (r*np.cos(ang_rad),r*np.sin(ang_rad))
 
+def get_simple_polygon_intersection(edges,edge):
+    """
+    given a list of edges forming a simple polygon, no self intersections, max 2 points which have the same x value and any vertical line intersects 1 (at an other edge) or two times
+
+    tries to find the intersection with another
+    """
+    x,y = edge
+    n = len(edges)
+    for i in range(n):
+        (x1, y1) = edges[i]
+        (x2, y2) = edges[(i + 1) % n]  # wrap around
+
+        if (x1<x and x<x2) or (x1> x and x > x2) :
+            t = (x - x1) / (x2 - x1)
+            y_intersection = y1 + t * (y2 - y1)
+            return (min(y_intersection,y), max(y_intersection,y))
+
+    return None
+
+def get_sectioning_of_simple_polygon(edges):
+    sections = []
+    lookup_dict = dict()
+    edges_sorted = sorted(edges,key = lambda x:x[0])
+    # first try to find sections consisting of two points at the same x axis, just different y axis
+    # error if for same x axis more than 2 points are found
+
+    for edge in edges:
+        x,y = edge
+        if x in lookup_dict:
+            assert len(lookup_dict[x])==1 , " max 2 points that have the same x value"
+            lookup_dict[x].append(y)
+            lookup_dict[x].sort()
+            sections.append((x,lookup_dict[x]))
+
+        else:
+            lookup_dict[x] = [y]
+
+        # find intersection for that edge to get a section corresponding to the edge, misses any edges themself
+        y_pair = get_simple_polygon_intersection(edges,edge)
+        if y_pair:
+            assert len(lookup_dict[x])==1, "not supported case, 2 edges with same x and polygon has an intersection with vertical line at same x that isnt an edge"
+            sections.append((edge[0],y_pair))
+
+    # sort sections
+    sections.sort(key=lambda x: x[0])
+    start_edge = edges_sorted[0]
+    end_edge = edges_sorted[-1]
+
+    #add in the start and end edge, unless foreach start and/or end has 2 points with same x
+    if sections[0][0]!= start_edge[0]:
+        sections.insert(0,(start_edge[0],(start_edge[1],start_edge[1])))
+    if sections[-1][0]!= end_edge[0]:
+        sections.append((end_edge[0],(end_edge[1],end_edge[1])))
+    return sections
+
+
+
+
 class DiskWithStopShape(Shape):
     """
     defines a diskshape with inner radius, outer radius and 2 points in first quadrant on that radii which acts as a stop 
@@ -274,15 +313,54 @@ class DiskWithStopShape(Shape):
         self.label = label
         self.rIn,self.rOut = np.sort((rIn,rOut))
         assert stoppers[0] != stoppers[1] , "the two points need to be different"
-        assert np.allclose((self.rIn,self.rOut),tuple(np.sort([np.linalg.norm(p) for p in stoppers]))) , "the stoppers need to be on the two radii"
+        assert np.allclose((self.rIn,self.rOut),tuple([np.linalg.norm(p) for p in stoppers])) , "the stoppers need to be on the two radii"
         assert np.all([p[1]>0 for p in stoppers]) , "stopper points need to be in the upper half plane"
         self.stoppers = stoppers
+        #with this first stopper is in the inner radius, second on the outer radius, else the second assert will throw an error
 
     def get_line_parameters(self):
         a,b = self.stoppers
         a = np.array(a)
         b = np.array(b)
         return b-a,a
+    
+    def get_cutout_shape_pcone_params(self):
+        inner,outer = self.stoppers
+        inner = np.array(inner)
+        outer = np.array(outer)
+        assert np.all([p[0]>=0 for p in self.stoppers]), "stoppers are assumed to have nonnegative x value"
+        inner_angle,outer_angle = np.arctan2(inner[1],inner[0]), np.arctan2(outer[1],outer[0])
+
+        ref_angle = min(inner_angle,outer_angle)
+        v,a = outer-inner,inner
+        points =  [v*t+a for t in [-0.01,1.01]]
+        if inner_angle> outer_angle:
+            lowerlimit = np.sin(ref_angle)*self.rIn- np.linalg.norm(v)*0.01
+            return [(x,(lowerlimit,y)) for (x,y) in points]
+        elif inner_angle<outer_angle :
+            upperxlimit = np.cos(ref_angle)*self.rOut +np.linalg.norm(v)*0.01
+            edges = [points[0], points[1], (upperxlimit,points[1][1]), (upperxlimit,points[0][1]) ]
+            return get_sectioning_of_simple_polygon(edges)
+        return None
+    
+    def get_cutout_shapes(self):
+        """
+        calculates the cutoutshape and also the ghost shape and returns it
+        """
+        pcone_param = self.get_cutout_shape_pcone_params()
+        if pcone_param:
+            edges = pcone_param_to_polygon(self.get_cutout_shape_pcone_params())
+            cutout = PolygonShape("red","cutout",edges)
+
+            inner,outer = self.stoppers
+            inner_angle,outer_angle = np.arctan2(inner[1],inner[0]), np.arctan2(outer[1],outer[0])
+            ref_angle = min(inner_angle,outer_angle)
+            ghost = CaloShape4PointDirect((0.082, 0.929, 0.8, 0.38),"ghost",self.rIn,self.rOut,self.rOut*2,0,np.degrees(ref_angle),0)
+
+
+            return [cutout,ghost]
+        return []
+
 
     def point_is_in(self,point):
         x,y  = point
@@ -295,7 +373,62 @@ class DiskWithStopShape(Shape):
             stopper_angle = np.arctan2(stopperpoint[1],stopperpoint[0])
             return angle_rad >= stopper_angle
         return False
+
+
+def sphere_cutout_volume(r,a,b):
+    """
+    given a sphere of radius r and a start-/endcutoff a / b lets say x axis 
+
+    return the volume of the cutout
+    """
+    assert a<=b, "b>=a is enforced"
+    assert r>=0, "positive radius"
+    a= max(a,-r)
+    b= min(b,r)
+
+    return np.pi*(r**2 *(b-a) - 1/3 * (b**3-a**3))
+
+def pcone_param_to_polygon(pcone: list[tuple[float,tuple[float,float]]]):
+    """
+    pcone parameter are a list of tuples of the form (x,y_min,y_max), this returns based on that a list of points that are the edegs of the polygon
+    """
+    forward = [(x,y_min) for x,(y_min,y_max) in pcone]
+    backward = [(x,y_max) for x,(y_min,y_max) in pcone]
+    backward.reverse()
+    forward.extend(backward)
+    return forward
+
+
+def fullcone_volume(m,k,a,b):
+    """
+    seeing the cone as a rotationvolume of the area under a line from start-/endcut a / b
+
+    given said lines m (slope) and k (offset) , such that m*x+k forms said line and a / b (start/end)    
     
+    return the volume of this cone
+    """
+    return np.pi * 1/3 * m**2 * (b**3 - a**3) + m * k * ( b**2 - a**2) + k**2 * ( b - a)
+
+def sphere_volume(r):
+    return 4/3 * np.pi * r**3
+
+def calo4point_rotation_volume(rInner,rOuter,innerRadiusPoint, innerConePoint,outerConePoint):
+    inner_sliver = sphere_cutout_volume(rInner,innerRadiusPoint[0],rInner)
+    outer_sliver = sphere_cutout_volume(rOuter,outerConePoint[0],rOuter)
+    hollow_sphere = sphere_volume(rOuter) - sphere_volume(rInner)
+    cone_volume_cutout = 0
+    if innerConePoint!=outerConePoint:
+        m,a = line_from_points(innerConePoint,outerConePoint)
+        cone_volume_cutout = fullcone_volume(m,a,innerConePoint[0],outerConePoint[0])
+
+
+    ycutoff_volume = 0
+    if innerRadiusPoint != innerConePoint:
+        m,a = line_from_points(innerRadiusPoint,innerConePoint)
+        assert abs(m)<1e-14, f"should be by design , {m}"
+        ycutoff_volume = fullcone_volume(0,innerRadiusPoint[1], innerRadiusPoint[0],innerConePoint[0] )
+    return hollow_sphere + inner_sliver - outer_sliver - cone_volume_cutout - ycutoff_volume
+
 
 class CaloShape4PointDirect(Shape):
     """
@@ -315,6 +448,40 @@ class CaloShape4PointDirect(Shape):
 
     def should_points_be_marked(self):
         return self.show_mark
+    
+
+    def cutout_cones_parameter(self):
+        pIn,pOut = self.get_radius_points()
+        cIn,cOut = self.get_cone_points()
+        ref_angle = np.arctan2(cOut[1],cOut[0])
+        shapes = []
+        if cIn[0]!= pIn[0]:
+            shapes.append([(0.99*pIn[0],(0,pIn[1])) ,( 1.01*cIn[0],(0,cIn[1])) ])
+        if cIn[0] != cOut[0]:
+            cIn,cOut = np.array(cIn), np.array(cOut)
+            v = cOut - cIn
+            points = [ v*t + cIn for t in [-0.01,1.01]]
+            shapes.append([(x,(0,y)) for x,y in points])
+        if cOut[1]!= pOut[1]:
+            shapes.append([(pOut[0],(0,pOut[1]*1.01)) ,( 1.01*self.rOut*np.cos(ref_angle)*1.01,(0,pOut[1]*1.01)) ])
+        return shapes
+
+    def get_cutouts(self):
+        cone_params = self.cutout_cones_parameter()
+
+        shapes = []
+        for cone_param in cone_params:
+            edges = pcone_param_to_polygon(cone_param)
+            color = (0.929, 0.082, 0.082, 0.561)
+            shape = MirrorPolygonShape(color,"cutout",edges)
+            shapes.append(shape)
+        return shapes
+
+
+
+    
+    def get_rotation_volume(self):
+        return calo4point_rotation_volume(self.rIn,self.rOut,self.get_radius_points()[0] ,  *self.get_cone_points())
     
     def mark_defining_points(self,ax):
         r1,r2 = self.get_radius_points()
@@ -400,7 +567,6 @@ class CaloShape4Point(CaloShape4PointDirect):
         self.rIn = rIn
         self.rOut = rOut
         self.show_mark = show_mark
-
         self.y_cutoff = self.calc_ycutoff_from_flat_length(flat_length)
     
     def calc_ycutoff_from_flat_length(self,flat_length):

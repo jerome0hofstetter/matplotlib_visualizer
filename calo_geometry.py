@@ -6,26 +6,6 @@ from geometry_imitator import *
 possible geometries for a calorimeter
 """
 
-class Mockup(GeometryImitator):
-
-
-    def get_parameter_list(self) -> list[tuple[str,float,float,float,str]]:
-        list = [
-            ("rIn",1,0.2,3,"inner radius"),
-            ("rOut",3,2,5,"outer radius"),
-            ("thetaIn", 45,0,180,"inner rad angle"),
-            ("thetaOut", 45,0,180,"outer rad angle"),
-            REDRAW_PARAM,
-            RASTER_NUM_PARAM
-        ]
-        return list
-
-    
-    def get_shape_list(self) -> list[Shape]:
-        calo = DiskWithStopShape("blue","testshape",self["rIn"],self["rOut"],(get_cirle_point(self["rIn"], self["thetaIn"]),get_cirle_point(self["rOut"],self["thetaOut"])))
-
-        return [calo,]
-    
 
 class Calorimeter(GeometryImitator):
     MAX_R = 120
@@ -404,6 +384,7 @@ class CalorimeterUpdated(GeometryImitator):
             
 
             ("detailed",False,0,0,"show detailed"),
+            ("annotate",True,0,0,"show annotations"),
             REDRAW_PARAM,
             RASTER_NUM_PARAM,
         ]
@@ -542,9 +523,34 @@ class CalorimeterUpdated(GeometryImitator):
     def get_outer_shell(self):
         return CombiShape("black","outer shell", (self.get_outer_shell_pre(),), (self.get_vacuum_boundary_shape_pre(),))
     
+# ----extending from baseclass
+    def points_of_interest(self):
+        """
+        returns a list of tuples of the form (point,color , label)
+        """
+        return [
+            ( self.get_sensor_shape_pre().get_radius_points()[0] , (0.706, 0.78, 0.325, 0.651) ,"innerpoint"),
+            ( self.get_active_shape().get_radius_points()[1] , (0.408, 0.859, 0.259, 0.651) ,"outerpoint"),
+        ]
+
+    def annotations(self,ax):
+        if not self["annotate"]:
+            return
+        for p,color,label in self.points_of_interest():
+            ax.plot(*p, marker='o', markersize=10, color=color, label =label)
+
 
     def get_geometry_values(self):
-        return []
+        liqXe_density = 3.1 # g/ml   or kg/l  #TODO get correct value, varies with temperature and pressure
+        active_vol_liter = self.get_active_shape().get_rotation_volume()/1000
+        base =  [ 
+            ("active volume",active_vol_liter,"liter"),
+            ("active volume",active_vol_liter*liqXe_density,"kg"),
+        ]
+        if self["annotate"]:
+            angles = [(f"angle of {label}",np.degrees(np.arctan2(y,x)),"degrees") for (x,y),color,label in self.points_of_interest()]
+            base.extend(angles)
+        return base
 
 
     def get_shape_list(self) -> list[Shape]:
@@ -579,4 +585,3 @@ class CalorimeterUpdated(GeometryImitator):
 
 print("use the sliders to change parameters of the geometry, use option 'see detailed' or zoom into a space and then click redraw")
 geometry = CalorimeterUpdated()
-geometry.view_geometry()

@@ -10,26 +10,6 @@ and what kind of adjustable prameters are needed, then this geometry imitator ca
 """
 #### --------------------------------
 
-def paint_shapes_in_axis(shapes : list[Shape],ax,xlim,ylim,num=100 ):
-    x = np.linspace(*xlim, num)
-    y = np.linspace(*ylim, num)
-
-    X, Y = np.meshgrid(x, y)
-    ax.set_aspect('equal') 
-    ax.set_autoscale_on(False)
-    ax.set_xlim(xlim)
-    ax.set_ylim(ylim)
-    for shape in shapes:
-        if shape:
-            shape.paint_shape(X,Y,ax)
-            shape.after_drawing_shape(ax)
-    legend_patches = [
-        shape.get_label_patch() for shape in shapes if shape
-    ]
-    h, l = ax.get_legend_handles_labels()
-    # Add legend
-    ax.legend(handles=legend_patches+h, title="Volumes")
-
 EMPTY_PARAM = ("",0,0,0,"")
 REDRAW_PARAM = ("redraw",0,0,0,"Redraw")
 RASTER_NUM_PARAM = ("raster",150,30,1000,"Raster Number")
@@ -39,6 +19,17 @@ class GeometryImitator(ABC):
 
     get an instance of it, call create_sliders, and append_redraw
     or directly use view_geometry
+
+    when extending needs to define 
+    - get_parameter_list
+    - get_shape_list
+
+    can define
+    - annotations
+    - get_geometry_values
+
+    to use direcftly instantiate and call view_geometry
+    
     """
 
     def __init__(self, view_size,see_negative_x=False,see_negative_y=False):
@@ -46,9 +37,6 @@ class GeometryImitator(ABC):
         self.see_negative_y = see_negative_y
         self.see_negative_x = see_negative_x
         self.button = None
-
-    def after_init(self):
-        pass
     
     def get_geometry_values(self):
         """
@@ -62,7 +50,7 @@ class GeometryImitator(ABC):
         
         result = ""
         for (name,val,postfix) in self.get_geometry_values():
-            result += f"\n{name:<20}: {val:>10} {postfix:<6}"
+            result += f"\n{name:<20}: {val:>10.4f} {postfix:<6}"
         return result
 
     def get_title(self):
@@ -81,7 +69,7 @@ class GeometryImitator(ABC):
         """
         returns a list of entries of the form (parameter name, initval, minval,maxval,label)
         
-        initialvalue being a float gives a slider, it being a boolean a checkbox
+        initialvalue being a number gives a slider, it being a boolean a checkbox
         """
         return [("a",1,1,2,"label")]
     
@@ -139,21 +127,50 @@ class GeometryImitator(ABC):
     def append_redraw(self,redraw):
         self.button.on_clicked(redraw)
 
+    def annotations(self,ax):
+        """
+        gets called after the shapes been drawn
+        """
+        pass
+
+    def paint_geometry(self,ax,xlim,ylim ):
+        x = np.linspace(*xlim, self.raster_count())
+        y = np.linspace(*ylim, self.raster_count())
+
+        X, Y = np.meshgrid(x, y)
+        ax.set_aspect('equal') 
+        ax.set_autoscale_on(False)
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        shapelist = self.get_shape_list()
+        for shape in shapelist:
+            if shape:
+                shape.paint_shape(X,Y,ax)
+                shape.after_drawing_shape(ax)
+        legend_patches = [
+            shape.get_label_patch() for shape in shapelist if shape
+        ]
+
+        self.annotations(ax)
+        
+        h, l = ax.get_legend_handles_labels()
+        # Add legend
+        ax.legend(handles=legend_patches+h, title="Volumes")
+
     def view_geometry(self):
         fig, ax = plt.subplots(figsize=(9, 8))
         def update(event):
             xlim = ax.get_xlim()
             ylim = ax.get_ylim()
             ax.clear()
-            paint_shapes_in_axis(self.get_shape_list(),ax,xlim,ylim,self.raster_count())
+            self.paint_geometry(ax,xlim,ylim)
             ax.set_title(self.get_title())
             ax.figure.canvas.draw_idle()
 
         fig_sliders = plt.figure(figsize=(6, 8))
         self.create_sliders(fig_sliders)
         self.append_redraw(update)
-
-        paint_shapes_in_axis(self.get_shape_list(),ax,self.get_init_xlim(),self.get_init_ylim(),self.raster_count())
+        self.paint_geometry(ax,self.get_init_xlim(),self.get_init_ylim())
         ax.set_title(self.get_title())
 
         plt.show()
