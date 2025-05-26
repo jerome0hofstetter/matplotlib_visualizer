@@ -330,11 +330,15 @@ def get_transistion_cone_points(calo_shape_outer,calo_shape_inner):
     rIn,p1,c1,d1 = get_inner_radial_cone_points(calo_shape_outer)
     rOut,p2,c2,d2 = get_inner_radial_cone_points(calo_shape_inner)
     assert c2[0]<=c1[0] , "require outershape innercone point to be farther away from y axis as innershape innercone point"
+    assert p1[0]<=c2[0] , "require outershape innercone point to be farther away from y axis as innershape inner radius point, perhaps distance between the shapes at the ycutoff was choosen too big"
     #this point is on the line formed by p1 and c1 at the same x as c2
     e1 = (c2[0],c1[1])
     return (rIn,rOut), [p1,p2,c2,e1], [e1,c2,d2,d1,c1]
 
 def get_cutoff_wall_points(calo_shape_outer,calo_shape_inner):
+    """
+    returns the list of edges for the polygon formed by the x cutoff wall
+    """
     c1,r1 = calo_shape_outer.get_cone_points()[1],calo_shape_outer.get_radius_points()[1]
     c2,r2 = calo_shape_inner.get_cone_points()[1],calo_shape_inner.get_radius_points()[1]
     return [c2,r2,r1,c1]
@@ -385,6 +389,9 @@ class CalorimeterUpdated(GeometryImitator):
 
             ("detailed",False,0,0,"show detailed"),
             ("annotate",True,0,0,"show annotations"),
+            ("arrows",True,0,0,"show arrow annotations"),
+            ("arrowlabelscale",1,0,3,"label scaler"),
+            SHOW_LEGEND,
             REDRAW_PARAM,
             RASTER_NUM_PARAM,
         ]
@@ -392,8 +399,6 @@ class CalorimeterUpdated(GeometryImitator):
 ### ---------------- direct parameters
     def inner_radius(self):
         return self["rIn"]
-    def inner_vacuum_d(self):
-        return self["innerVacuum"]
     def inner_window_rad(self):
         return self.inner_radius() + self["innerWindow"]
     def outer_window_in_rad(self):
@@ -412,6 +417,8 @@ class CalorimeterUpdated(GeometryImitator):
         return self.outer_vacuum_start() + self["outerRVacuum"]
     def outer_radius(self):
         return self.outer_vacuum_end() + self["outerRshell"]
+    
+
     def outer_cone_offset(self):
         return self["outerCone"]
     def cone_vacuum_end_offset(self):
@@ -420,6 +427,7 @@ class CalorimeterUpdated(GeometryImitator):
         return self.cone_vacuum_end_offset() + self["innerCone"]
     def active_start_offset(self):
         return self.inner_shell_cone_offset() + self["sensorCone"]
+    
     def shell_cutoff(self):
         return self["cutoff"]
     def vacuum_start_cutoff(self):
@@ -533,11 +541,64 @@ class CalorimeterUpdated(GeometryImitator):
             ( self.get_active_shape().get_radius_points()[1] , (0.408, 0.859, 0.259, 0.651) ,"outerpoint"),
         ]
 
+    
+    def arrow_annotations(self,ax):
+        radius_keys = [
+            "rIn",
+            "innerWindow",
+            "innerRVacuum",
+            "outerWindow",
+            "innerRsensor",
+            "active",
+            "outerRsensor",
+            "innerRshell",
+            "outerRVacuum",
+            "outerRshell"
+        ]
+        
+        self.start_end_segment_annotation(ax,(0,0),get_unit_vector(80),radius_keys,reference_scaler=self["arrowlabelscale"])
+        active_shape = self.get_active_shape()
+        cones = [np.array(point) for point in active_shape.get_cone_points()]
+        outerRadP = np.array(active_shape.get_radius_points()[1])
+        cutoff_ref = (cones[1] + outerRadP)/2
+        offset_ref = (cones[0] + cones[1])/2
+        xcutoff_keys = [
+            "outercut",
+            "cutoffVacuum",
+            "innercut",
+            "sensorCut",
+        ]
+        self.start_end_segment_annotation(ax,cutoff_ref,(-1,0),xcutoff_keys,False, reference_scaler=self["arrowlabelscale"])
+        offset_keys = [
+            "outerCone",
+            "coneVacuum",
+            "innerCone",
+            "sensorCone",
+        ]
+        self.start_end_segment_annotation(ax,offset_ref,get_unit_vector(90+self["alpha"]),offset_keys,False,reference_scaler=self["arrowlabelscale"])
+        draw_annotation_arrow(ax,(0,0),(self["cutoff"],0), "x cutoff")
+
+        # of form [p1,p2,c2,e1]
+        inner_transistion_edges = self.get_inner_transition().edges
+        draw_annotation_arrow(ax,inner_transistion_edges[2],inner_transistion_edges[1], "inner Window \n transition width",reference_scaler=0.6*self["arrowlabelscale"])
+        draw_annotation_arrow(ax,inner_transistion_edges[2],inner_transistion_edges[3], "inner Window \n transition height",reference_scaler=7*self["arrowlabelscale"])
+        draw_annotation_arrow(ax,(inner_transistion_edges[3][0],0),inner_transistion_edges[3], "zoom into inner window \n depends on inner window width&height",
+                              reference_scaler=1*self["arrowlabelscale"],color="blue",label_color="black")
+        outer_transistion_edges = self.get_outer_transition().edges
+        draw_annotation_arrow(ax,outer_transistion_edges[2],outer_transistion_edges[1], "outer Window \n transition width",reference_scaler=0.6*self["arrowlabelscale"])
+        draw_annotation_arrow(ax,outer_transistion_edges[2],outer_transistion_edges[3], "outer Window \n transition height",reference_scaler=7*self["arrowlabelscale"])
+        draw_annotation_arrow(ax,(outer_transistion_edges[3][0],0),outer_transistion_edges[3], "zoom into outer window \n depends on outer window width&height",
+                              reference_scaler=1*self["arrowlabelscale"],color="blue",label_color="black")
+        
+
     def annotations(self,ax):
-        if not self["annotate"]:
+        if not self["annotate"] or not self["arrows"]:
             return
         for p,color,label in self.points_of_interest():
             ax.plot(*p, marker='o', markersize=10, color=color, label =label)
+        if self["arrows"]:
+            self.arrow_annotations(ax)
+
 
 
     def get_geometry_values(self):
@@ -567,11 +628,12 @@ class CalorimeterUpdated(GeometryImitator):
                 self.get_inner_cutoff(),
 
                 self.get_inner_window(),
-                self.get_inner_transition(),
                 self.get_outer_window(),
-                self.get_outer_transition(),
+                
                 self.get_outer_cone(),
-                self.get_inner_cone()
+                self.get_inner_cone(),
+                self.get_inner_transition(),
+                self.get_outer_transition(),
             ]
         else:
             return [
@@ -582,7 +644,19 @@ class CalorimeterUpdated(GeometryImitator):
                 self.get_active_shape(),
             ]
         
+print("this visualises the liquid xenon geometry with all possible parameters forming the geometry itself")
+print("conceptually has an outer layer, a vacuum, an inner layer, a sensor layer and in the center the active volume")
+print("the shapes of the layers are all of type Calo4PointShape just with different parameters (and insides subtracted)")
+print("if 'see detailed' is off those layers are shown which fully create the main geometry, \n while if on it shows the individuel parts (which now only depend on the layers and some of the distinct points of them)")
+print("all shapes are either created via cuting out other shapes or baseshapes, baseshapes are the Calo4PointShape, DiskWithStopShape or polygons")
+print()
+print("considerations to shape")
+print("the vacuum is needed to termally isolate the center (liquid xenon), the inner and outer shells to contain the liquid xenon and vacuum, sensor layer for sipms and pmts ")
+print("inner and outer shell are sectioned (sensor should also be but not needed for this visualisation) as they should be individual volumes, which is easier for simulation analysis after")
+print("the inner radial part of the inner and other shells are thin windows to reduce energy loss of particles coming from atar, which are then welded to the cone, that transiston is its own shape")
+print()
+print("other boolean options have control if certain things should be shown on top of the geometry,the legend, arrow annotation (they show how different parameter affect the geometry) or other annotations (like distincgt points)")
 
-print("use the sliders to change parameters of the geometry, use option 'see detailed' or zoom into a space and then click redraw")
+print("use the sliders to change parameters of the geometry above the boolean options and after changing or zooming in use redraw to redo the pixelated view")
 geometry = CalorimeterUpdated()
 geometry.view_geometry()

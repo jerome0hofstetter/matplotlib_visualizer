@@ -12,6 +12,7 @@ and what kind of adjustable prameters are needed, then this geometry imitator ca
 
 EMPTY_PARAM = ("",0,0,0,"")
 REDRAW_PARAM = ("redraw",0,0,0,"Redraw")
+SHOW_LEGEND = ("legend",True,0,0,"show legend")
 RASTER_NUM_PARAM = ("raster",150,30,1000,"Raster Number")
 class GeometryImitator(ABC):
     """
@@ -80,6 +81,9 @@ class GeometryImitator(ABC):
 
     def get_slider_dict(self):
         return self.parameter_dict
+    
+    def param_label(self,key):
+        return [p[-1] for p in  self.get_parameter_list() if p[0]==key][0]
 
     def __getitem__(self, key):
         obj = self.parameter_dict[key]
@@ -152,10 +156,11 @@ class GeometryImitator(ABC):
         ]
 
         self.annotations(ax)
-        
-        h, l = ax.get_legend_handles_labels()
+        SHOW_LEGEND
         # Add legend
-        ax.legend(handles=legend_patches+h, title="Volumes")
+        if not SHOW_LEGEND in self.get_parameter_list() or self["legend"]:
+            h, l = ax.get_legend_handles_labels()
+            ax.legend(handles=legend_patches+h, title="Volumes")
 
     def view_geometry(self):
         fig, ax = plt.subplots(figsize=(9, 8))
@@ -174,3 +179,39 @@ class GeometryImitator(ABC):
         ax.set_title(self.get_title())
 
         plt.show()
+
+    def start_end_segment_annotation(self,ax,ref,vec,keys,is_start = True,reference_scaler=1):
+        """
+        given axis, ref point (either start or endpoint , depending on is_start), a direction (vector that will get normed)
+        and a list of keys, draws a series in line described by start,vec with lengths taken from the keys
+        """
+        ref = np.array(ref)
+        vec = vec/np.linalg.norm(vec)
+        start = ref if is_start else ref - vec * np.sum([self[key] for key in keys])
+        for key in keys:
+            end = start + vec*self[key]
+            draw_annotation_arrow(ax,start,end,self.param_label(key),reference_scaler=reference_scaler)
+            start = end
+def draw_annotation_arrow(ax,start,end,label,minimum_font = 2,reference_scaler=1,color="red",label_color = "orange", base_fontsize=20,head_width_ratio = 0.05, head_length_ratio = 0.1):
+    start = np.array(start)
+    end= np.array(end)
+    vec = end - start
+    length = np.linalg.norm(vec)
+    ax.arrow(*start, *vec, head_width=length*head_width_ratio, head_length=length*head_length_ratio, 
+         fc=color, ec=color, length_includes_head=True)
+
+    yleft,yright = ax.get_ylim()
+    reference_size = yright-yleft
+    #fontsize scaled based on relative arrowsize with minimum fontsize
+    fontsize = max(base_fontsize * length/reference_size * reference_scaler,minimum_font)
+    if fontsize <=40:
+        #add label in  the center of arrow
+        midpoint = (start + end) / 2
+        ax.text(*midpoint, label, fontsize=fontsize, ha='center', va='center',color=label_color)
+
+def get_unit_vector(degree):
+    """
+    returns unitvector with angle in degrees from x axis 
+    """
+    alpha = np.radians(degree)
+    return np.array([np.cos(alpha), np.sin(alpha)])

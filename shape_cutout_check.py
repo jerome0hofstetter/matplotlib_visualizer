@@ -87,11 +87,16 @@ class PolygonSectioningCheck(GeometryImitator):
 
         coor = ["x","y"]
         def default_val(coor,number):
+
             if coor ==0: #x value
+                if number==4 :
+                    return 4
                 return number//2* 4 + 2
             else:
+                if number==4 :
+                    return 0
                 return (number +1 )//2 % 2 * 4 + 2
-        paramList = [ (f"{key}{num}",default_val(key,num) ,0,10,  f"{coor[key]}{num}")  for num in range(4)  for key in range(2)     ]
+        paramList = [ (f"{key}{num}",default_val(key,num) ,0,10,  f"{coor[key]}{num}")  for num in range(5)  for key in range(2)     ]
         paramList.extend([REDRAW_PARAM,
             RASTER_NUM_PARAM])
 
@@ -99,10 +104,26 @@ class PolygonSectioningCheck(GeometryImitator):
 
     
     def get_shape_list(self) -> list[Shape]:
-        poly = PolygonShape((0.082, 0.929, 0.8, 0.38),"polygon", [(self[f"0{num}"],self[f"1{num}"]) for num in range(4)])
+        poly = PolygonShape((0.082, 0.929, 0.8, 0.38),"polygon", [(self[f"0{num}"],self[f"1{num}"]) for num in range(5)])
         return [poly,]
     
 
-geometryList = [DiskWithStopShapeCheck(), PolygonSectioningCheck(),CaloShape4PointShapeCheck()]
-for geometry in geometryList:
+
+geometryList = [DiskWithStopShapeCheck(),CaloShape4PointShapeCheck(),PolygonSectioningCheck()]
+desc_list = [
+    "this shape is parameterised by inner and outer radius with a point on each radius being the stop \n"+
+    "this shows how this shape can be created via a makesphere (hollow circle stopping at some angle) and then a cutout via a polygon suitably placed \n"+
+    "the stoppers are for ease of use parameteres by an angle, can throw an error if the line connecting the stoppers intersect with the inner radius, this working properly can be verified with this",
+
+    "this shape is parameterised more heavily, inner/outer radius, xcutoff,ycutoff and another line parallel to a line through zero at given angle \n"+
+    "but with a given offset. This shows how to create this shape, again with a makesphere like shape and then subtracting away via polygons \n",
+    "multiple (if needed) cutouts with edges going a bit further than necessary are used to ensure that no points are left where bounday becomes hard to evaluate",
+
+    "if a polygon cant be parameterised via edges but instead via sections of the form (x,(y_min,y_max)) a general function making this parameter change is handy \n"+
+    "this is a visual test if the function handles it well by showing the sections and throwing errors if not sectionable or has self intersections"
+]
+for i,geometry in enumerate(geometryList):
+    print()
+    print(desc_list[i])
+    print("close both windows to go to the next geometry")
     geometry.view_geometry()

@@ -244,6 +244,49 @@ def get_cirle_point(r,angle):
     ang_rad = np.radians(angle)
     return (r*np.cos(ang_rad),r*np.sin(ang_rad))
 
+def last_point_redundant(res_edges,edge, tol=1e-8):
+    """
+    checks if the last added point is redundant or not, if that point is on the same line as the line formed by secondlast point and new point
+
+    throws an assertion error if new point is on the same line as the two points but between the last two points
+
+    assumes res_edges contains unique points
+    """
+    if len(res_edges)<2:
+        return False
+    A = np.array(res_edges[-2])
+    B = np.array(res_edges[-1])
+    P = np.array(edge)
+    
+    
+    AB = B - A
+    AP = P - A
+    
+    cross = AB[0]*AP[1] - AB[1]*AP[0]  # scalar cross product in 2D
+    cross = cross / np.linalg.norm(AB) / np.linalg.norm(AP) # norm crossproduct
+    if np.abs(cross)<tol:
+        assert np.linalg.norm(AB) <=np.linalg.norm(AP), "the new point is on the line formed by the last two points AND between those two points"
+        return True
+    return False
+    
+def cleanup_polygon_edges(edges):
+    """
+    returns a new list of edges with all the unnecessary edges removed: same edge back to back are removed and
+    if 3 edges are on the same line the middle edge is not needed
+    """
+    res_edges = []
+    for edge in edges:
+        if len(res_edges)==0:
+            res_edges.append(edge)
+        elif not np.allclose(res_edges[-1], edge, rtol=1e-9, atol=1e-12):
+            if last_point_redundant(res_edges,edge):
+                res_edges.pop()
+            res_edges.append(edge)
+    if last_point_redundant(res_edges,res_edges[0]):
+        res_edges.pop(0)
+    return res_edges
+
+
 def get_simple_polygon_intersection(edges,edge):
     """
     given a list of edges forming a simple polygon, no self intersections, max 2 points which have the same x value and any vertical line intersects 1 (at an other edge) or two times
@@ -263,9 +306,66 @@ def get_simple_polygon_intersection(edges,edge):
 
     return None
 
+def pointline_intersect(p ,q):
+    """
+    given 2 sets of points, each forming a line segment from one to the other
+    return if they intersect or not
+
+
+    """
+    p = [np.array(s) for s in p]
+    q = [np.array(s) for s in q]
+    v_1,a_1 = p[1] - p[0],p[0]
+    v_2,a_2 = q[1] - q[0],q[0]
+    # v_1 t_1 + a_1 = v_2 t_2 + a_2  -> a_1 - a_2 = v_2 t_2 - v_1 t_1 = V @ t
+    V = np.column_stack((-v_1,v_2))
+    A = a_1 - a_2
+    det = np.linalg.det(V)
+    if np.abs(det) > 1e-10:
+        t = np.linalg.solve(V, A)
+        if 0<=t[0]<=1 and 0<=t[1]<=1:
+            print(f"found intersection for : {p} with {q} at {a_1 + v_1 * t[0]} with t : {t}")
+            return True
+    return False
+
+def has_self_intersections(edges):
+    n = len(edges)
+    def get_edge_pair(r):
+        return (edges[r % n],edges[(r+1) % n])
+    for i in range(n):
+        for j in range(n-3):
+            if pointline_intersect(get_edge_pair(i),get_edge_pair(i+j+2)):
+                return True
+    return False
+
+def is_sectionable_polygon(edges,allow_intersections = False):
+    n = len(edges)
+    if n<3:
+        return False
+    start_index = np.argmin([p[0]] for p in edges)
+    if edges[(start_index+1)% n ][0] == edges[start_index][0]:
+        start_index +=1
+    dirr  =1
+    # starts at point with smallest x, iterates over, looks for direction changes, allows for 1 directionchange, 
+    # a second one right at the end (for edgecase where there are two edges with the same minimal x)
+    for i in range(n):
+        point1 = edges[(start_index+i)% n ]
+        point2 =  edges[(start_index+1+i)% n ]
+        if dirr* point1[0]>=point2[0] * dirr:
+            dirr *= -2
+            if abs(dirr)>3 and i<n-1:
+                return False
+
+    return not has_self_intersections(edges) or allow_intersections
+
 def get_sectioning_of_simple_polygon(edges):
     sections = []
     lookup_dict = dict()
+    edges = cleanup_polygon_edges(edges)
+    if not is_sectionable_polygon(edges):
+        print("polygon is not simple or not sectionable")
+    #assert is_simple_sectionable_polygon(edges), "polygon is not simple or not sectionable"
+
     edges_sorted = sorted(edges,key = lambda x:x[0])
     # first try to find sections consisting of two points at the same x axis, just different y axis
     # error if for same x axis more than 2 points are found
@@ -312,11 +412,19 @@ class DiskWithStopShape(Shape):
         self.color = color
         self.label = label
         self.rIn,self.rOut = np.sort((rIn,rOut))
-        assert stoppers[0] != stoppers[1] , "the two points need to be different"
         assert np.allclose((self.rIn,self.rOut),tuple([np.linalg.norm(p) for p in stoppers])) , "the stoppers need to be on the two radii"
         assert np.all([p[1]>0 for p in stoppers]) , "stopper points need to be in the upper half plane"
         self.stoppers = stoppers
         #with this first stopper is in the inner radius, second on the outer radius, else the second assert will throw an error
+
+        #
+        v,a = self.get_line_parameters()
+        line_angle = np.arctan2(v[1],v[0])
+        innerpoint = self.stoppers[0]
+        innerpoint_angle = np.arctan2(innerpoint[1],innerpoint[0])
+        angle_diff = line_angle-innerpoint_angle
+        # looking at the tangentline of inner radius at the inner stopper, rotate to have that point on x axis, limit the angle then between -180 to 180 degrees
+        assert -np.pi/2<=angle_diff and angle_diff <= np.pi/2, "the stoppers are placed such that the line formed by those two intersects the inner radius at a 3. point between the stoppers"
 
     def get_line_parameters(self):
         a,b = self.stoppers
@@ -325,20 +433,29 @@ class DiskWithStopShape(Shape):
         return b-a,a
     
     def get_cutout_shape_pcone_params(self):
+        """
+        returns if necessary the parameters of a cutout shape (polygon) that are needed to create this shape as the result of 
+        subtracting away the cutout shape from a optimised makesphere shape
+
+        a makesphere shape is a shape generated from parameterising in spherical coordinates radius r in [rIn,rOut], 
+        polar angle theta in [0,180-theta_cut] (0 is at negative x-axis) and azimuthal angle phi in [0,360] (full rotation)
+
+        optimised for theta_cut such that a minimum needs to be cutout
+        """
         inner,outer = self.stoppers
         inner = np.array(inner)
         outer = np.array(outer)
         assert np.all([p[0]>=0 for p in self.stoppers]), "stoppers are assumed to have nonnegative x value"
         inner_angle,outer_angle = np.arctan2(inner[1],inner[0]), np.arctan2(outer[1],outer[0])
 
-        ref_angle = min(inner_angle,outer_angle)
+        theta_cut = min(inner_angle,outer_angle)
         v,a = outer-inner,inner
         points =  [v*t+a for t in [-0.01,1.01]]
         if inner_angle> outer_angle:
-            lowerlimit = np.sin(ref_angle)*self.rIn- np.linalg.norm(v)*0.01
+            lowerlimit = np.sin(theta_cut)*self.rIn- np.linalg.norm(v)*0.01
             return [(x,(lowerlimit,y)) for (x,y) in points]
         elif inner_angle<outer_angle :
-            upperxlimit = np.cos(ref_angle)*self.rOut +np.linalg.norm(v)*0.01
+            upperxlimit = np.cos(theta_cut)*self.rOut +np.linalg.norm(v)*0.01
             edges = [points[0], points[1], (upperxlimit,points[1][1]), (upperxlimit,points[0][1]) ]
             return get_sectioning_of_simple_polygon(edges)
         return None
