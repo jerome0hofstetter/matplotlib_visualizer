@@ -6,7 +6,7 @@ from geometry_imitator import *
 possible geometries for a calorimeter
 """
 
-
+# this was more of an initial testrun as well as the base of the next
 class Calorimeter(GeometryImitator):
     MAX_R = 120
     def __init__(self):
@@ -151,8 +151,8 @@ class Calorimeter(GeometryImitator):
         innerpoint = self.get_active_shape().innerpoint
         outerpoint = self.get_active_shape().outerpoint
         return [
-            ("innerpoint active angle",f"{np.degrees(np.arctan2(innerpoint[1],innerpoint[0]) ):3.2f}","degrees"),
-            ("outerpoint active angle",f"{np.degrees(np.arctan2(outerpoint[1],outerpoint[0]) ):3.2f}","degrees")
+            ("innerpoint active angle",np.degrees(np.arctan2(innerpoint[1],innerpoint[0]) ),"degrees"),
+            ("outerpoint active angle",np.degrees(np.arctan2(outerpoint[1],outerpoint[0]) ),"degrees")
         ]
 
 
@@ -643,7 +643,8 @@ class CalorimeterUpdated(GeometryImitator):
                 self.get_sensor_shape(),
                 self.get_active_shape(),
             ]
-        
+
+
 print("this visualises the liquid xenon geometry with all possible parameters forming the geometry itself")
 print("conceptually has an outer layer, a vacuum, an inner layer, a sensor layer and in the center the active volume")
 print("the shapes of the layers are all of type Calo4PointShape just with different parameters (and insides subtracted)")

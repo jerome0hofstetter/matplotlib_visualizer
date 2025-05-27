@@ -342,7 +342,7 @@ def is_sectionable_polygon(edges,allow_intersections = False):
     n = len(edges)
     if n<3:
         return False
-    start_index = np.argmin([p[0]] for p in edges)
+    start_index = np.argmin([p[0] for p in edges])
     if edges[(start_index+1)% n ][0] == edges[start_index][0]:
         start_index +=1
     dirr  =1
@@ -362,6 +362,7 @@ def get_sectioning_of_simple_polygon(edges):
     sections = []
     lookup_dict = dict()
     edges = cleanup_polygon_edges(edges)
+    #TODO move to assert instead of print
     if not is_sectionable_polygon(edges):
         print("polygon is not simple or not sectionable")
     #assert is_simple_sectionable_polygon(edges), "polygon is not simple or not sectionable"
